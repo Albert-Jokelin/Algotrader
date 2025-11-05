@@ -1,0 +1,1 @@
+/usr/bin/c++     CMakeFiles/OrderManager_test.dir/OrderManager_test.cpp.o  -o OrderManager_test  ../src/liboms_core.a 

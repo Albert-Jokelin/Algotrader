@@ -56,14 +56,14 @@ class UpstoxTradingBot:
         Place a buy or sell order.
         """
         instrument = self.upstox.get_instrument_by_symbol(exchange, symbol)
-        self.upstox.place_order(
-            transaction_type=transaction_type,
-            instrument=instrument,
-            quantity=quantity,
-            order_type=order_type,
-            product="CNC",
-            duration="DAY"
-        )
+        # self.upstox.place_order(
+        #     transaction_type=transaction_type,
+        #     instrument=instrument,
+        #     quantity=quantity,
+        #     order_type=order_type,
+        #     product="CNC",
+        #     duration="DAY"
+        # )
         print(f"Order placed: {transaction_type} {quantity} of {symbol}")
 
     def execute_strategy(self, strategy_func, *args, **kwargs):

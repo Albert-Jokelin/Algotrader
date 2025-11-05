@@ -1,0 +1,11 @@
+/mnt/d/Code/GitHub/Algotrader/build/CMakeFiles/rebuild_cache.dir
+/mnt/d/Code/GitHub/Algotrader/build/CMakeFiles/edit_cache.dir
+/mnt/d/Code/GitHub/Algotrader/build/CMakeFiles/test.dir
+/mnt/d/Code/GitHub/Algotrader/build/src/CMakeFiles/rebuild_cache.dir
+/mnt/d/Code/GitHub/Algotrader/build/src/CMakeFiles/edit_cache.dir
+/mnt/d/Code/GitHub/Algotrader/build/src/CMakeFiles/test.dir
+/mnt/d/Code/GitHub/Algotrader/build/src/CMakeFiles/oms_core.dir
+/mnt/d/Code/GitHub/Algotrader/build/tests/CMakeFiles/rebuild_cache.dir
+/mnt/d/Code/GitHub/Algotrader/build/tests/CMakeFiles/edit_cache.dir
+/mnt/d/Code/GitHub/Algotrader/build/tests/CMakeFiles/test.dir
+/mnt/d/Code/GitHub/Algotrader/build/tests/CMakeFiles/OrderManager_test.dir

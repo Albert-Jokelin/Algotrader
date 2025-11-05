@@ -1,0 +1,2 @@
+/usr/bin/ar qc liboms_core.a  CMakeFiles/oms_core.dir/core/Order.cpp.o CMakeFiles/oms_core.dir/core/OrderManager.cpp.o
+/usr/bin/ranlib liboms_core.a
