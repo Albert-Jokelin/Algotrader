@@ -1,0 +1,13 @@
+requests>=2.31
+aiohttp>=3.8
+websocket-client>=1.6
+websockets>=11.0
+pydantic>=1.10
+tenacity>=8.2
+python-dotenv>=1.0
+
+[dev]
+pytest
+pytest-asyncio
+responses
+aioresponses

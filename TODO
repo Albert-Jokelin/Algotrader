@@ -1,0 +1,10 @@
+Version 0.0.0 Alpha (Handover to Chirayu by 20th November)
+- [ ] Read upstox documentation to figure out their API 
+- [ ] Understand and rewrite code as per Upstox API. 
+- [ ] Create a tester that he can use to test buy, sell and view portfolio
+- [ ] Create a wiki page to store details about knowledge gained while working
+
+Version 0.0.1 Alpha 
+- [ ] Rewrite code to follow standard C++ design patterns 
+- [ ] Simulate buy/sell/portfolio with paper money. Look into compiling two different applications so that we don't loose money down the line. 
+- [ ] Create a mechanism for Chirayu to write strategies. Pinecode V6 -> optimized C/C++

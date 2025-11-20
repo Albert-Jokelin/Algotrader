@@ -1,0 +1,4 @@
+tests
+tools
+upstoxlite
+venv
