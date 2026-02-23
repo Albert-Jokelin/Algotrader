@@ -1,0 +1,25 @@
+// Bollinger Band Breakout Strategy — NSE Equities
+// Timeframe: Daily
+// Entry : Close breaks above upper Bollinger Band
+// Exit  : Close falls below middle band (SMA)
+//
+// Usage:
+//   python -m algotrader backtest \
+//     --script strategies/bollinger_breakout.pine \
+//     --symbol TCS --exchange NSE \
+//     --from 2022-01-01 --to 2024-01-01 \
+//     --capital 500000
+
+strategy("Bollinger Breakout", overlay=true)
+
+bb_len  = 20
+bb_mult = 2.0
+
+upper = ta.bbands(close, bb_len, bb_mult)
+sma20 = ta.sma(close, bb_len)
+
+if close > upper
+    strategy.entry("Long", strategy.long)
+
+if close < sma20
+    strategy.close("Long")
