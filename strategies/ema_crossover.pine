@@ -1,0 +1,28 @@
+// EMA Crossover Strategy — NSE Equities
+// Timeframe: Daily
+// Entry : 9 EMA crosses above 21 EMA
+// Exit  : 9 EMA crosses below 21 EMA
+//
+// Usage:
+//   python -m algotrader backtest \
+//     --script strategies/ema_crossover.pine \
+//     --symbol RELIANCE --exchange NSE \
+//     --from 2022-01-01 --to 2024-01-01 \
+//     --capital 500000
+
+strategy("EMA Crossover", overlay=true)
+
+fast_len = 9
+slow_len = 21
+
+fast_ema = ta.ema(close, fast_len)
+slow_ema = ta.ema(close, slow_len)
+
+long_entry = ta.crossover(fast_ema, slow_ema)
+long_exit  = ta.crossunder(fast_ema, slow_ema)
+
+if long_entry
+    strategy.entry("Long", strategy.long)
+
+if long_exit
+    strategy.close("Long")

@@ -1,0 +1,25 @@
+// RSI Reversal Strategy — NSE Equities
+// Timeframe: Daily
+// Entry : RSI(14) drops below 30 (oversold) → buy
+// Exit  : RSI(14) rises above 70 (overbought) → sell
+//
+// Usage:
+//   python -m algotrader backtest \
+//     --script strategies/rsi_reversal.pine \
+//     --symbol INFY --exchange NSE \
+//     --from 2022-01-01 --to 2024-01-01 \
+//     --capital 300000
+
+strategy("RSI Reversal", overlay=false)
+
+rsi_len  = 14
+oversold  = 30
+overbought = 70
+
+rsi_val = ta.rsi(close, rsi_len)
+
+if rsi_val < oversold
+    strategy.entry("Long", strategy.long)
+
+if rsi_val > overbought
+    strategy.close("Long")
