@@ -1,0 +1,10 @@
+[flake8]
+exclude =
+    .venv,
+    .git,
+    __pycache__,
+    build,
+    dist,
+    *.egg-info,
+    upstoxlite_package/.venv
+max-line-length = 127
