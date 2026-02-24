@@ -12,6 +12,8 @@ A robust, type-safe Python wrapper for the Upstox API, supporting both Synchrono
 ## System Design
 For a detailed overview of the architectural decisions and system design, please refer to [DESIGN.md](DESIGN.md).
 
+---
+
 ## Installation
 
 ### Prerequisites
@@ -44,6 +46,8 @@ It is highly recommended to run this project in a virtual environment to avoid c
     pip install -e .
     ```
 
+---
+
 ## Configuration
 
 Create a `.env` file in the root directory with your credentials:
@@ -56,6 +60,8 @@ UPSTOX_REDIRECT_URI=your_redirect_uri
 # Optional: For Sandbox Mode
 UPSTOX_SANDBOX_ACCESS_TOKEN=your_sandbox_access_token
 ```
+
+---
 
 ## Usage
 
@@ -91,4 +97,51 @@ print(client.build_authorize_url())
 # Use API
 profile = client.get_profile()
 print(profile.name)
+
+# Fetch historical candles
+candles = client.get_historical_candle_data(
+    instrument_key="NSE_EQ|INE002A01018",  # RELIANCE
+    interval="1day",
+    from_date="2024-01-01",
+    to_date="2024-12-31",
+)
+```
+
+---
+
+## Integration with Algotrader
+
+This package is used as the live broker backend for the parent **Algotrader** system. The `UpstoxBroker` class in `algotrader/broker/upstox_broker.py` wraps `UpstoxSyncClient` to implement the `IBroker` interface:
+
+```
+algotrader (Pine Script engine)
+    └─► algotrader.broker.UpstoxBroker
+            └─► upstoxlite.UpstoxSyncClient
+                    └─► Upstox REST API
+```
+
+### Broker modes
+
+| `BROKER_MODE` | Upstoxlite usage |
+|---|---|
+| `paper` | Not used — local simulation only |
+| `sandbox` | `UpstoxConfig(sandbox=True)` |
+| `live` | `UpstoxConfig(sandbox=False)` |
+
+### Symbol mapping
+
+`UpstoxBroker` maintains a built-in `_SYMBOL_MAP` that translates NSE ticker symbols (e.g. `RELIANCE`) to Upstox instrument keys (e.g. `NSE_EQ|INE002A01018`). To add support for a new instrument, update `_SYMBOL_MAP` in `algotrader/broker/upstox_broker.py`.
+
+### Historical data
+
+`algotrader.data.HistoricalDataService` calls `UpstoxSyncClient.get_historical_candle_data()` to fetch OHLCV bars for backtesting. If the API call fails (network error, missing token), it falls back to CSV files in `data_cache/{EXCHANGE}_{SYMBOL}_{interval}.csv`.
+
+---
+
+## Running Tests
+
+```bash
+# From the upstoxlite_package directory
+pip install -e ".[dev]"
+pytest tests/ -v
 ```
