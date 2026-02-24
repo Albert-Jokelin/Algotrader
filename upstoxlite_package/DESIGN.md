@@ -3,6 +3,10 @@
 ## Overview
 Upstoxlite is a lightweight, Pythonic wrapper for the Upstox API. It is designed to be robust, type-safe, and easy to use for both synchronous and asynchronous applications.
 
+It is used as the broker backend for the **Algotrader** system — a Pine Script interpreter and backtesting engine for Indian markets (NSE/BSE). See the [parent README](../README.md) for the full system overview.
+
+---
+
 ## Architectural Decisions
 
 ### 1. Sync and Async Clients
@@ -42,6 +46,56 @@ Upstoxlite is a lightweight, Pythonic wrapper for the Upstox API. It is designed
 - **Maintainability**: Keeps files small and focused.
 - **Separation of Concerns**: Configuration is separate from logic; data models are separate from API calls.
 
+---
+
+## Integration with Algotrader Broker Layer
+
+Upstoxlite serves as the network transport layer for `UpstoxBroker`, which implements the `IBroker` abstract interface defined in the parent Algotrader system.
+
+### Data flow
+
+```
+BacktestEngine / LiveRunner
+        │
+        ▼  TradingSignal
+   RiskManager
+        │
+        ▼  Order
+   UpstoxBroker          ← implements IBroker ABC
+        │
+        ▼  REST payload
+   UpstoxSyncClient      ← upstoxlite
+        │
+        ▼  HTTPS
+   Upstox API (sandbox or production)
+```
+
+### Key integration points
+
+| Algotrader component | Upstoxlite API used |
+|---|---|
+| `UpstoxBroker.submit_order()` | `client.place_order()` |
+| `UpstoxBroker.cancel_order()` | `client.cancel_order()` |
+| `UpstoxBroker.get_positions()` | `client.get_positions()` |
+| `HistoricalDataService.fetch()` | `client.get_historical_candle_data()` |
+
+### Error mapping
+
+Upstoxlite exceptions are translated to Algotrader's exception hierarchy inside `UpstoxBroker`:
+
+| Upstoxlite / HTTP | Algotrader exception |
+|---|---|
+| Order status `REJECTED` | `OrderRejectedError` |
+| Any network/API exception | `BrokerConnectionError` |
+| Order not found | `OrderNotFoundError` |
+
+### Symbol resolution
+
+Upstox requires instrument keys in the format `NSE_EQ|<ISIN>` (e.g. `NSE_EQ|INE002A01018`). `UpstoxBroker._map_symbol()` translates human-readable NSE tickers using a built-in `_SYMBOL_MAP`. This mapping is maintained inside `algotrader/broker/upstox_broker.py` and can be extended as new instruments are needed.
+
+---
+
 ## Future Considerations
-- **Websocket Improvements**: Enhance the websocket client with more robust reconnection logic and event-driven callbacks.
-- **Coverage**: Continue adding remaining API endpoints as needed.
+- **Websocket Improvements**: Enhance the websocket client with more robust reconnection logic and event-driven callbacks for live trading integration.
+- **Coverage**: Continue adding remaining Upstox API endpoints (Option chain Greeks, GTT orders) as needed.
+- **Streaming quotes**: Feed real-time tick data into the Algotrader signal pipeline to enable live strategy execution alongside the existing backtest mode.

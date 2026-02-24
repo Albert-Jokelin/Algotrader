@@ -1,171 +1,320 @@
-# Algorithmic Trading System: OMS Core & Market Analysis
+# Algotrader — Pine Script Algo Trading for Indian Markets
 
-This repository contains the building blocks for an algorithmic trading system, featuring a C++ core for a high-performance Order Management System (OMS) and Python scripts for market analysis.
+A complete, locally-running algorithmic trading system for NSE/BSE that interprets TradingView Pine Script v5 strategies, backtests them against historical data, and executes orders via the Upstox API.
 
-The system is designed with a clear separation of concerns:
--   **C++ Core**: Handles the critical, low-latency tasks of creating, sending, and managing the lifecycle of trading orders.
--   **Python Scripts**: Used for higher-level financial analysis, data fetching, and strategy prototyping.
+## Features
 
-## System Architecture and Design Patterns
+- **Local Pine Script interpreter** — no TradingView webhooks; runs entirely on your machine
+- **Bar-by-bar backtest engine** with equity curve, Sharpe ratio, CAGR, max drawdown
+- **Three broker modes**: paper (local simulation), Upstox sandbox, Upstox live
+- **Full signal pipeline**: Pine Script → signal validation → risk management → order execution
+- **NSE/BSE market hours** aware (09:15–15:30 IST, holiday calendar)
+- **301 tests**, all passing (TDD from the ground up)
 
-The project follows a modular architecture where different components can be developed and tested independently. The design heavily relies on established software design patterns to ensure flexibility and maintainability.
+---
 
+## Architecture
 
-### Core Design Patterns
+```
+┌──────────────────────────────────────────────────────────────┐
+│                        CLI / Entry Point                      │
+│              python -m algotrader backtest / run-script       │
+└───────────────────────────┬──────────────────────────────────┘
+                            │
+              ┌─────────────▼──────────────┐
+              │   Pine Script Interpreter   │
+              │  Lexer → Parser → AST       │
+              │  → Bar-by-bar Evaluator     │
+              └─────────────┬──────────────┘
+                            │  TradingSignal objects
+              ┌─────────────▼──────────────┐
+              │      Signal Processor       │
+              │  (validation, dedup,        │
+              │   market-hours filter)      │
+              └─────────────┬──────────────┘
+                            │
+              ┌─────────────▼──────────────┐
+              │       Risk Manager          │
+              │  (position cap, portfolio   │
+              │   exposure, daily loss)     │
+              └─────────────┬──────────────┘
+                            │
+         ┌──────────────────┼────────────────────┐
+         │                  │                     │
+   ┌─────▼─────┐    ┌───────▼──────┐    ┌────────▼───────┐
+   │   Paper   │    │   Upstox     │    │  Upstox Live   │
+   │  Broker   │    │  Sandbox     │    │  (production)  │
+   └───────────┘    └──────────────┘    └────────────────┘
+```
 
-*   **Strategy Pattern**: The `IBrokerConnector` interface allows the system's trading behavior to be changed at compile time. The `OrderManager` is configured with a "strategy" for communicating with a broker—either a `MockBrokerConnector` for testing or a `UpstoxBrokerConnector` for live trading. This decouples the core logic from the specific broker implementation.
-
-*   **Factory Method Pattern**: A `BrokerFactory` class provides a static method (`createBrokerConnector`) to construct the appropriate broker object. This abstracts the instantiation logic and decides which connector to create based on the compile-time `MODE` flag, cleanly separating configuration from use.
-
-*   **Facade Pattern**: The `OrderManager` class acts as a Facade, providing a simple, unified interface (`submitOrder`, `cancelOrder`) to the more complex underlying subsystems of order validation, state management, and broker communication.
-
-*   **State Pattern (Finite State Machine)**: The lifecycle of an `Order` (from `PENDING_NEW` to `FILLED` or `CANCELLED`) is managed as a finite state machine within the `OrderManager`. The `processExecutionReport` function drives the transitions between these states based on incoming broker reports.
-
-
-
-## Architecture Overview
-
-The project follows a modular architecture where different components can be developed and tested independently.
-
-1.  **Analysis (Python)**: Scripts like `market_regime.py` analyze market data (e.g., from Yahoo Finance) to determine the market's current state (e.g., "Trending," "Volatile").
-2.  **Strategy (Conceptual)**: A trading strategy (which would be built on top of this framework) uses the analysis to make decisions (e.g., "If the market is Trending, buy RELIANCE").
-3.  **Execution (C++)**: The strategy instructs the C++ `OrderManager` to submit an order.
-4.  **Broker Interaction (C++)**: The `OrderManager` sends the order to a financial broker via a connector that implements the `IBrokerConnector` interface.
-
-5.  **State Management (C++)**: The `OrderManager` listens for feedback from the broker (via `ExecutionReport` callbacks) to maintain the real-time status of each order (e.g., `SUBMITTED`, `FILLED`, `CANCELLED`).
+---
 
 ## Directory Structure
 
 ```
-.
-├── Backtesting/
-│   └── test.py           # Python script to fetch historical data from Upstox.
-├── src/
-│   ├── core/
-│   │   ├── Order.h
-│   │   ├── OrderManager.h
-│   │   ├── OrderManager.cpp
-│   │   └── ...             # Other core C++ components.
-│   ├── Interface/
-│   │   └── IBrokerConnector.h # Abstraction for connecting to brokers.
-│   └── mvp_main.cpp        # Main application demonstrating OMS usage.
+Algotrader/
+├── algotrader/                  # Main Python package
+│   ├── __init__.py
+│   ├── __main__.py              # python -m algotrader entry point
+│   ├── cli.py                   # Argument parsing & command dispatch
+│   ├── config.py                # Settings dataclasses (RiskConfig, UpstoxConfig, …)
+│   ├── exceptions.py            # Full custom exception hierarchy
+│   ├── pine/
+│   │   ├── lexer.py             # Tokeniser (regex-based)
+│   │   ├── ast_nodes.py         # Typed AST node dataclasses
+│   │   ├── parser.py            # Recursive-descent parser
+│   │   ├── builtins.py          # ta.* indicator implementations
+│   │   └── evaluator.py        # Bar-by-bar AST evaluator
+│   ├── signals/
+│   │   ├── models.py            # Pydantic v2 models (TradingSignal, Order, Fill, Position)
+│   │   └── processor.py        # Signal validation, dedup, market-hours filter
+│   ├── strategy/
+│   │   └── market_hours.py     # IST-aware NSE/BSE market hours + holiday calendar
+│   ├── risk/
+│   │   ├── manager.py           # Risk gates: position cap, exposure, daily loss
+│   │   └── position_sizer.py   # Fixed qty / % of capital / risk-based sizing
+│   ├── broker/
+│   │   ├── base.py              # IBroker ABC
+│   │   ├── paper_broker.py      # Local simulation broker
+│   │   └── upstox_broker.py    # Upstox API broker (wraps upstoxlite)
+│   ├── backtest/
+│   │   ├── engine.py            # Bar-by-bar backtest engine
+│   │   └── metrics.py          # Performance metrics computation
+│   └── data/
+│       └── historical.py        # Historical data: Upstox API + CSV fallback
+│
+├── strategies/                  # Sample Pine Script v5 strategies
+│   ├── ema_crossover.pine       # 9 EMA / 21 EMA crossover
+│   ├── rsi_reversal.pine        # RSI(14) oversold/overbought
+│   └── bollinger_breakout.pine  # Bollinger Band breakout
+│
 ├── tests/
-│   └── OrderManager_test.cpp # Unit tests for the OrderManager.
-├── market_regime.py        # Python script for market regime analysis.
-├── Makefile                # GNU Makefile for building the C++ code.
-└── README.md               # This documentation file.
+│   ├── unit/                    # 293 unit tests across all modules
+│   │   ├── test_signal_models.py
+│   │   ├── test_pine_lexer.py
+│   │   ├── test_pine_parser.py
+│   │   ├── test_pine_builtins.py
+│   │   ├── test_pine_evaluator.py
+│   │   ├── test_market_hours.py
+│   │   ├── test_signal_processor.py
+│   │   ├── test_position_sizer.py
+│   │   ├── test_risk_manager.py
+│   │   ├── test_paper_broker.py
+│   │   ├── test_upstox_broker.py
+│   │   └── test_backtest_engine.py
+│   └── integration/
+│       └── test_full_pipeline.py  # 8 end-to-end tests
+│
+├── upstoxlite_package/          # Upstox Python SDK (see its own README)
+├── src/                         # C++ OMS core (legacy, see below)
+├── Backtesting/                 # Original backtesting scripts
+├── data_cache/                  # CSV fallback for historical data
+├── requirements.txt
+├── pyproject.toml
+└── README.md
 ```
 
-## C++ Core: Order Management System (OMS)
+---
 
-The C++ core is a robust, thread-safe system for managing the entire lifecycle of trading orders.
+## Quick Start
 
-### Key Components
+### 1. Install dependencies
 
-#### `OrderManager` (`src/core/OrderManager.h`, `src/core/OrderManager.cpp`)
-This is the central class of the OMS.
--   **Responsibilities**:
-    -   `submitOrder`: Validates an order, assigns it a unique `clientOrderId`, and sends it to the broker.
-    -   `cancelOrder`: Sends a cancellation request for an active order.
-    -   `processExecutionReport`: A critical callback function that processes status updates from the broker (e.g., fills, cancellations) and updates the internal state of the corresponding order.
-    -   `getOrderStatus`: Retrieves the current status of any tracked order.
--   **Thread Safety**: It uses a `std::mutex` to protect its internal order map (`activeOrders_`), making it safe to use in a multi-threaded environment where orders might be submitted and status reports received concurrently.
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 
-#### `IBrokerConnector` (`src/Interface/IBrokerConnector.h`)
-This is an abstract base class (an interface) that defines the contract for any broker connection.
--   **Purpose**: It decouples the `OrderManager` from any specific broker's API. This allows the system to switch between different brokers (e.g., Upstox, Interactive Brokers) simply by providing a new concrete implementation of this interface. This is an application of the **Dependency Inversion Principle**.
+# Install the local Upstox SDK
+pip install -e upstoxlite_package/
+```
 
-#### `mvp_main.cpp` (`src/mvp_main.cpp`)
-This is a sample executable that demonstrates how to use the `OrderManager`. It simulates a simple trading scenario:
-1.  A mock broker connector is created.
-2.  The `OrderManager` is initialized with the mock broker.
-3.  A sample BUY order for "RELIANCE" is created.
-4.  The order is submitted via the `OrderManager`.
-5.  The mock broker simulates receiving the order and later sending back a "FILLED" execution report.
-6.  The `OrderManager` processes the report and updates the order's status to `FILLED`.
+### 2. Configure environment
 
-## Python Scripts
+```bash
+export UPSTOX_ACCESS_TOKEN=your_token_here   # required for live/sandbox mode
+export BROKER_MODE=paper                     # paper | sandbox | live
+export INITIAL_CAPITAL=1000000
+```
 
-The Python scripts are used for data analysis and prototyping, providing the intelligence that would drive trading decisions.
+### 3. Run a backtest
 
-### `market_regime.py`
--   **Purpose**: To identify the market's current "regime" or state. This is a common technique used to select the most appropriate trading strategy for current conditions.
--   **Functionality**:
-    1.  Downloads historical price data for the Nifty 50 index (`^NSEI`) from Yahoo Finance.
-    2.  Calculates three key technical indicators:
-        -   **Simple Moving Average (SMA)**: To gauge the trend direction.
-        -   **Average True Range (ATR)**: To measure market volatility.
-        -   **Average Directional Index (ADX)**: To measure the strength of the current trend.
-    3.  Classifies each day into one of three regimes based on the indicators:
-        -   **Trending**: Strong, directional market movement.
-        -   **Volatile**: Choppy price action with large swings but no clear trend.
-        -   **Ranging**: Calm, sideways market with low volatility.
-    4.  Generates a plot of the price history, color-coded by the identified regime, and saves the data to `market_regimes.csv`.
+```bash
+python -m algotrader backtest \
+  --script strategies/ema_crossover.pine \
+  --symbol RELIANCE \
+  --exchange NSE \
+  --from 2024-01-01 \
+  --to 2024-12-31 \
+  --capital 500000
+```
 
-### `Backtesting/test.py`
--   **Purpose**: A utility script to fetch historical candlestick data from the **Upstox API**.
--   **Usage**: This script demonstrates how to connect to a specific broker's API to gather data. This data is essential for backtesting trading strategies to evaluate their historical performance before deploying them live.
+Example output:
+```
+Backtest Results — RELIANCE (NSE)
+  Period       : 2024-01-01 → 2024-12-31
+  Capital      : ₹500,000
+  Final Equity : ₹541,230
+  Total Return : +8.25%
+  CAGR         : 8.25%
+  Max Drawdown : -4.12%
+  Sharpe Ratio : 1.34
+  Trades       : 22  (Win rate: 59.1%)
+```
 
-## How to Compile the C++ Code
+### 4. Inspect a Pine Script (AST dump)
 
-The C++ application is built using GNU Make.
+```bash
+python -m algotrader run-script --script strategies/rsi_reversal.pine
+```
 
-### Prerequisites
+### 5. Run all tests
 
-1.  **g++ Compiler**: Ensure you have a modern C++ compiler that supports C++17. On Debian/Ubuntu, you can install it with:
-    ```sh
-    sudo apt-get update
-    sudo apt-get install build-essential
-    ```
+```bash
+pytest tests/ -v
+# 301 tests, ~8s
+```
 
-2.  **Google Test (for running tests)**: To compile and run the unit tests, you need to install the Google Test framework.
-    ```sh
-    sudo apt-get install libgtest-dev libgmock-dev
-    ```
+---
 
-### Build Commands
+## Pine Script Support
 
-All commands should be run from the root directory of the project.
+The interpreter supports a useful subset of Pine Script v5:
 
--   **Compile the main application (Release Mode)**:
-    This builds an optimized executable at `bin/mvp_main`.
-    ```sh
-    make
-    ```
+| Feature | Status |
+|---|---|
+| `var` / `varip` persistent variables | Supported |
+| `if` / `else` blocks | Supported |
+| `:=` reassignment | Supported |
+| Series indexing `close[1]` | Supported |
+| Arithmetic & comparison operators | Supported |
+| `strategy()` declaration | Supported |
+| `strategy.entry()` / `.exit()` / `.close()` | Supported |
+| `ta.sma()` / `ta.ema()` | Supported |
+| `ta.rsi()` | Supported |
+| `ta.macd()` | Supported |
+| `ta.bbands()` | Supported |
+| `ta.atr()` | Supported |
+| `ta.crossover()` / `ta.crossunder()` | Supported |
+| `ta.highest()` / `ta.lowest()` | Supported |
+| `ta.stdev()` | Supported |
+| Built-in series: `open`, `high`, `low`, `close`, `volume` | Supported |
+| `math.*` functions | Partial |
+| `for` loops | Not yet |
+| User-defined functions | Not yet |
+| Arrays / matrices | Not yet |
 
--   **Compile in Debug Mode**:
-    This includes debugging symbols for use with tools like `gdb`.
-    ```sh
-    make DEBUG=1
-    ```
+---
 
--   **Compile and Run Tests**:
-    This builds the test runner at `bin/run_tests` and executes it.
-    ```sh
-    make test
-    ./bin/run_tests
-    ```
+## Broker Modes
 
--   **Clean Build Artifacts**:
-    This removes the `build` and `bin` directories to clean up all compiled files.
-    ```sh
-    make clean
-    ```
-#### Interactive Tester
+| Mode | Description |
+|---|---|
+| `paper` | Local simulation; fills immediately at market price. No API calls. |
+| `sandbox` | Uses Upstox Sandbox API. Simulated trades against real market data. |
+| `live` | Uses Upstox Production API. Real money, real orders. Use with caution. |
 
--   **Build and Run the Interactive Tester**:
-    This special application lets you simulate buy/sell commands against the `UpstoxBrokerConnector`. It always builds in `PROD` mode.
-    ```sh
-    make upstox_tester && ./bin/upstox_tester
-    ```
+Set via environment variable `BROKER_MODE` or `--broker-mode` CLI flag.
 
-    # Algorithmic Trading System: OMS Core & Market Analysis
+---
 
-This repository contains the building blocks for an algorithmic trading system, featuring a C++ core for a high-performance Order Management System (OMS) and Python scripts for market analysis.
+## Risk Management
 
-The system is designed with a clear separation of concerns:
--   **C++ Core**: Handles the critical, low-latency tasks of creating, sending, and managing the lifecycle of trading orders.
--   **Python Scripts**: Used for higher-level financial analysis, data fetching, and strategy prototyping.
+Configured via `RiskConfig` (environment variables or code):
 
+| Parameter | Default | Description |
+|---|---|---|
+| `MAX_POSITION_PCT` | 5% | Max capital in a single instrument |
+| `MAX_PORTFOLIO_EXPOSURE_PCT` | 80% | Max total exposure across all positions |
+| `MAX_DAILY_LOSS_PCT` | 2% | Daily drawdown circuit-breaker |
+| `DEFAULT_STOP_LOSS_PCT` | 2% | Default stop-loss if not set in signal |
+| `DEFAULT_TAKE_PROFIT_PCT` | 4% | Default take-profit if not set in signal |
 
-## Directory Structure
+---
+
+## Signal Pipeline
+
+```
+Pine Script file
+      │
+      ▼ Lexer → Parser → AST
+      │
+      ▼ Evaluator (bar-by-bar)
+      │   └─ emits TradingSignal objects
+      │
+      ▼ SignalProcessor
+      │   ├─ validates required fields
+      │   ├─ checks market hours (09:15–15:30 IST, weekdays, non-holiday)
+      │   └─ deduplicates signals within configurable window
+      │
+      ▼ RiskManager
+      │   ├─ daily loss limit check
+      │   ├─ portfolio exposure check
+      │   └─ position size calculation (fixed / % capital / risk-based)
+      │
+      ▼ IBroker.submit_order()
+          └─ PaperBroker | UpstoxBroker
+```
+
+---
+
+## Sample Strategies
+
+### EMA Crossover (`strategies/ema_crossover.pine`)
+```pine
+//@version=5
+strategy("EMA Crossover", overlay=true)
+
+fast = ta.ema(close, 9)
+slow = ta.ema(close, 21)
+
+if ta.crossover(fast, slow)
+    strategy.entry("Long", strategy.long)
+
+if ta.crossunder(fast, slow)
+    strategy.close("Long")
+```
+
+### RSI Reversal (`strategies/rsi_reversal.pine`)
+```pine
+//@version=5
+strategy("RSI Reversal", overlay=false)
+
+rsi = ta.rsi(close, 14)
+
+if rsi < 30
+    strategy.entry("Long", strategy.long)
+
+if rsi > 70
+    strategy.close("Long")
+```
+
+---
+
+## C++ OMS Core (Legacy)
+
+The `src/` directory contains a C++ Order Management System built as the original foundation. It is kept for reference and low-latency use cases.
+
+- **`src/core/OrderManager.h/.cpp`** — Thread-safe OMS with FSM order lifecycle
+- **`src/Interface/IBrokerConnector.h`** — Broker abstraction interface
+- **`src/mvp_main.cpp`** — Demo executable
+
+Build with:
+```bash
+make          # release build → bin/mvp_main
+make test     # run C++ unit tests (requires libgtest-dev)
+make clean    # remove build artifacts
+```
+
+---
+
+## Project Dependencies
+
+| Package | Purpose |
+|---|---|
+| `pydantic>=2` | Data models & validation |
+| `pytz` | IST timezone handling |
+| `pandas` / `numpy` | Numerical computations |
+| `httpx` | Async HTTP client |
+| `pytest` + `freezegun` | Testing framework |
+| `upstoxlite` | Upstox API wrapper (local package) |
