@@ -25,6 +25,26 @@ class RiskConfig:
     # Default take-profit distance as fraction of entry price.
     default_take_profit_pct: float = 0.04    # 4 %
 
+    # ── Execution realism (all default to 0 / disabled for backward-compat) ───
+    # Market-order slippage in basis points (1 bps = 0.01%).
+    # Buys fill higher, sells fill lower by this amount.
+    slippage_bps: float = 0.0
+    # Flat brokerage per trade in INR (e.g. 20.0 for Zerodha/Upstox flat fee).
+    commission_flat: float = 0.0
+    # Percentage brokerage as a fraction of turnover (e.g. 0.0003 = 0.03%).
+    # Actual brokerage = min(commission_flat, commission_pct * turnover).
+    commission_pct: float = 0.0
+    # Maximum fill quantity as a fraction of the bar's traded volume.
+    # 0 = disabled; 0.1 = can fill at most 10 % of bar volume.
+    volume_cap_pct: float = 0.0
+
+    # ── Automated risk stops (None = disabled) ─────────────────────────────────
+    # Trailing stop-loss as a fraction of price (e.g. 0.02 = 2% trail).
+    trailing_sl_pct: Optional[float] = None
+    # Per-trade maximum loss as a fraction of position cost basis.
+    # If unrealised loss exceeds this, the position is force-closed.
+    max_loss_per_trade_pct: Optional[float] = None
+
 
 @dataclass
 class WebhookConfig:
