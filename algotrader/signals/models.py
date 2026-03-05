@@ -134,6 +134,11 @@ class Order(BaseModel):
     stop_loss: Optional[float] = None     # OCO stop-loss price
     take_profit: Optional[float] = None   # OCO take-profit price
 
+    # Product type determines margin, STT regime, and auto-squareoff behaviour.
+    product: str = "NRML"   # "MIS" (intraday) | "NRML" (overnight) | "CNC" (delivery)
+    # Order validity governs how long the order lives if unfilled.
+    validity: str = "DAY"   # "DAY" | "IOC" (immediate-or-cancel) | "GTC" (good-till-cancelled)
+
     status: OrderStatus = OrderStatus.PENDING
     filled_quantity: int = 0
     average_fill_price: Optional[float] = None
@@ -179,10 +184,18 @@ class Fill(BaseModel):
     quantity: int
     price: float
 
+    # Total transaction costs: brokerage + STT + exchange charge + SEBI fee + stamp duty + GST.
+    charges: float = 0.0
+
     @property
     def value(self) -> float:
         """Gross fill value in INR."""
         return self.quantity * self.price
+
+    @property
+    def net_value(self) -> float:
+        """Fill value minus all charges."""
+        return self.value - self.charges
 
 
 # ── Position model ────────────────────────────────────────────────────────────
@@ -198,6 +211,15 @@ class Position(BaseModel):
     average_price: float
 
     realised_pnl: float = 0.0
+
+    # ── Trailing stop-loss state ───────────────────────────────────────────────
+    # Trail percentage, e.g. 0.02 = 2%. None means trailing SL is disabled.
+    trailing_pct: Optional[float] = None
+    # Current trailing stop level.  Updated bar-by-bar by the engine.
+    trailing_sl: Optional[float] = None
+    # High-water mark: highest price seen since entry for longs,
+    # lowest price seen since entry for shorts.
+    hwm: float = 0.0
 
     @property
     def cost_basis(self) -> float:
