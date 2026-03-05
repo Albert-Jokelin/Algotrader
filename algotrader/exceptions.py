@@ -59,6 +59,32 @@ class BrokerConnectionError(BrokerError):
     """Raised when the broker API is unreachable."""
 
 
+# ── Pine Script errors ────────────────────────────────────────────────────────
+
+class PineScriptError(AlgoTraderError):
+    """Base for Pine Script interpreter errors."""
+
+
+class UnsupportedFeatureError(PineScriptError):
+    """Raised when a Pine Script construct is not supported by this interpreter.
+
+    Attributes:
+        feature:  Short name of the unsupported construct (e.g. "for_loop").
+        line:     Source line number, or 0 if not available.
+        hint:     Optional suggestion for the user.
+    """
+
+    def __init__(self, feature: str, line: int = 0, hint: str = "") -> None:
+        self.feature = feature
+        self.line = line
+        self.hint = hint
+        location = f" at line {line}" if line else ""
+        detail = f" — {hint}" if hint else ""
+        super().__init__(
+            f"Unsupported Pine Script feature: {feature!r}{location}{detail}"
+        )
+
+
 # ── Backtest errors ───────────────────────────────────────────────────────────
 
 class BacktestError(AlgoTraderError):

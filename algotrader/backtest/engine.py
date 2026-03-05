@@ -92,6 +92,9 @@ class BacktestEngine:
             # (b) Automated stop checks on open positions
             self._check_stops(broker, risk_mgr, bar)
 
+            # (b2) Intraday square-off: force-close all MIS positions at 15:15 IST
+            self._check_intraday_squareoff(broker, risk_mgr, bar)
+
             # (c) Evaluate Pine Script up to this bar
             bar_bars = self._bars_up_to(bar_idx)
             ev = Evaluator(
@@ -233,6 +236,61 @@ class BacktestEngine:
                     self._force_exit(
                         pos, broker, risk_mgr, bar_close, bar_volume
                     )
+
+    def _check_intraday_squareoff(
+        self,
+        broker: PaperBroker,
+        risk_mgr: RiskManager,
+        bar: Dict[str, Any],
+    ) -> None:
+        """Force-close all MIS positions when the bar timestamp reaches or passes squareoff_time.
+
+        The bar dict may optionally contain a ``timestamp`` key (ISO-8601 string or
+        datetime).  If absent, intraday square-off is skipped (opt-in feature).
+
+        Square-off price is bar["close"]; the close-of-the-squareoff-bar is the
+        standard assumption for NSE MIS auto square-off.
+        """
+        squareoff_str = self._risk_config.squareoff_time
+        if not squareoff_str:
+            return
+
+        ts = bar.get("timestamp")
+        if ts is None:
+            return  # No timestamp in bars — skip
+
+        # Parse the timestamp
+        from datetime import datetime as dt
+        bar_time = None
+        if isinstance(ts, str):
+            try:
+                bar_time = dt.fromisoformat(ts)
+            except ValueError:
+                return
+        elif isinstance(ts, dt):
+            bar_time = ts
+        else:
+            return
+
+        # Parse squareoff time (HH:MM)
+        try:
+            hh, mm = [int(x) for x in squareoff_str.split(":")]
+        except (ValueError, AttributeError):
+            return
+
+        bar_hhmm = bar_time.hour * 60 + bar_time.minute
+        squareoff_hhmm = hh * 60 + mm
+
+        if bar_hhmm < squareoff_hhmm:
+            return
+
+        bar_close = bar["close"]
+        bar_volume = bar.get("volume", 0.0)
+
+        for pos in list(broker.get_positions()):
+            # Only MIS positions are auto-squared-off; NRML/CNC carry overnight.
+            if getattr(pos, "product", "NRML").upper() == "MIS":
+                self._force_exit(pos, broker, risk_mgr, bar_close, bar_volume)
 
     def _force_exit(
         self,

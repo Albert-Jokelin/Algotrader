@@ -141,6 +141,7 @@ class TestUpstoxFundBalance:
         broker._cash = 0.0
         broker._capital_fetched_at = 0.0
         broker._instrument_master = None
+        broker._submitted_ids = set()
         return broker
 
     def test_available_capital_fetches_from_api(self):
@@ -425,6 +426,7 @@ class TestUpstoxProductMapping:
         broker._cash = 1_000_000.0
         broker._capital_fetched_at = time.time()
         broker._instrument_master = InstrumentMaster.from_csv_text(_SAMPLE_CSV)
+        broker._submitted_ids = set()
 
         captured = []
         mock = MagicMock()

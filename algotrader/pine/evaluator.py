@@ -34,6 +34,7 @@ from algotrader.pine.ast_nodes import (
     UnaryOp,
     VarDeclaration,
 )
+from algotrader.exceptions import UnsupportedFeatureError
 from algotrader.pine.builtins import TaLib
 from algotrader.signals.models import (
     Exchange,
@@ -90,8 +91,46 @@ class Evaluator:
 
     # ── Public API ─────────────────────────────────────────────────────────────
 
+    # Pine Script node types the parser might produce for unsupported constructs.
+    _UNSUPPORTED_NODE_TYPES = frozenset({
+        "ForStatement", "WhileStatement", "SwitchStatement",
+        "FunctionDef", "TypeDef", "MethodDef",
+    })
+
+    def _check_unsupported_nodes(self, program: Program) -> None:
+        """Walk the AST once and raise immediately on any unsupported node type.
+
+        This is done before bar-by-bar execution so the user gets a clear error
+        at script-load time rather than a silent misbehaviour mid-backtest.
+        """
+        stack = list(program.body)
+        while stack:
+            node = stack.pop()
+            if node is None:
+                continue
+            node_type = type(node).__name__
+            if node_type in self._UNSUPPORTED_NODE_TYPES:
+                raise UnsupportedFeatureError(
+                    feature=node_type,
+                    line=getattr(node, "line", 0),
+                    hint="This construct is not supported by the interpreter.",
+                )
+            # Recurse into known list-bearing attributes.
+            for attr in ("body", "else_body", "args"):
+                child = getattr(node, attr, None)
+                if isinstance(child, list):
+                    stack.extend(child)
+
     def run(self, program: Program) -> List[TradingSignal]:
-        """Execute the program bar-by-bar and return all emitted signals."""
+        """Execute the program bar-by-bar and return all emitted signals.
+
+        Raises:
+            UnsupportedFeatureError: If the AST contains any node type the
+                interpreter cannot handle (for-loop, while-loop, user-defined
+                function/type, etc.).  The error is raised before bar-1 so
+                the user sees a clear message at script-load time.
+        """
+        self._check_unsupported_nodes(program)
         self._signals = []
 
         for bar_idx in range(self._n_bars):
@@ -164,6 +203,18 @@ class Evaluator:
         elif isinstance(node, (FunctionCall, BinaryOp, Identifier, Literal, MemberAccess)):
             # Expression used as statement (side-effect evaluation)
             self._eval(node)
+
+        else:
+            # Any AST node type not handled above is an unsupported construct.
+            # Raise loudly so the user knows exactly what went wrong.
+            raise UnsupportedFeatureError(
+                feature=type(node).__name__,
+                line=getattr(node, "line", 0),
+                hint=(
+                    "This Pine Script construct is not supported by the interpreter. "
+                    "Supported: if/else, var, assignments, ta.*, strategy.entry/exit/close."
+                ),
+            )
 
     # ── Expression evaluation ──────────────────────────────────────────────────
 
@@ -304,11 +355,27 @@ class Evaluator:
             if ns == "math":
                 return self._call_math(fn, node)
 
+            # Unknown namespace (e.g. array.*, map.*, matrix.*, request.*)
+            raise UnsupportedFeatureError(
+                feature=f"{ns}.{fn}",
+                line=getattr(node, "line", 0),
+                hint=(
+                    f"The namespace '{ns}' is not supported. "
+                    "Supported namespaces: ta, math, strategy."
+                ),
+            )
+
         # Bare function call
         if isinstance(func, Identifier):
             return self._call_builtin(func.name, node)
 
-        return None
+        # Non-identifier callable (e.g. result of another expression) —
+        # unsupported (user-defined functions are not implemented).
+        raise UnsupportedFeatureError(
+            feature="dynamic_call",
+            line=getattr(node, "line", 0),
+            hint="Dynamic or user-defined function calls are not supported.",
+        )
 
     # ── ta.* dispatch ──────────────────────────────────────────────────────────
 
@@ -405,8 +472,16 @@ class Evaluator:
             result = TaLib.stdev(series, length)
             return result[self._bar_index]
 
-        # Unknown ta.* — return NaN
-        return NaN
+        # Unknown ta.* — raise so the user knows it is not implemented
+        raise UnsupportedFeatureError(
+            feature=f"ta.{fn}",
+            line=getattr(node, "line", 0),
+            hint=(
+                f"ta.{fn}() is not implemented. Supported ta functions: "
+                "sma, ema, rsi, macd, bbands, atr, crossover, crossunder, "
+                "highest, lowest, stdev."
+            ),
+        )
 
     def _call_math(self, fn: str, node: FunctionCall) -> Any:
         arg = self._eval(node.args[0]) if node.args else 0
@@ -426,8 +501,15 @@ class Evaluator:
         # Handled via StrategyEntry/Exit/Close nodes in _exec
         return None
 
+    # Known bare built-in names that we handle or deliberately tolerate.
+    _KNOWN_BUILTINS = frozenset({
+        "nz", "na", "float", "int", "bool", "str", "color",
+        "input", "plot", "plotshape", "bgcolor", "hline", "label",
+        "line", "box", "table", "alert",  # visual/output — ignored at runtime
+    })
+
     def _call_builtin(self, name: str, node: FunctionCall) -> Any:
-        """Bare function calls (e.g. input.int, nz, etc.)."""
+        """Bare function calls (e.g. nz, na, input.int, etc.)."""
         if name in ("nz", "na"):
             # nz(x, y) → x if not na else y
             if len(node.args) >= 1:
@@ -435,7 +517,29 @@ class Evaluator:
                 if val is None or (isinstance(val, float) and math.isnan(val)):
                     return self._eval(node.args[1]) if len(node.args) > 1 else 0
                 return val
-        return None
+            return None
+
+        # Visual/output/input builtins — evaluated for side-effect args but
+        # do not produce a meaningful runtime value.
+        if name in self._KNOWN_BUILTINS:
+            # Evaluate args so assignments don't break.
+            for arg in node.args:
+                try:
+                    self._eval(arg)
+                except Exception:
+                    pass
+            return None
+
+        # Unknown bare function — could be a user-defined function definition
+        # or an unrecognised built-in.  Raise clearly.
+        raise UnsupportedFeatureError(
+            feature=f"function:{name}",
+            line=getattr(node, "line", 0),
+            hint=(
+                f"'{name}()' is not a recognised built-in and user-defined "
+                "functions are not supported by this interpreter."
+            ),
+        )
 
     # ── Strategy signal emission ───────────────────────────────────────────────
 

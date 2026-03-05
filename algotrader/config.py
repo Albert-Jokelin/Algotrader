@@ -45,6 +45,39 @@ class RiskConfig:
     # If unrealised loss exceeds this, the position is force-closed.
     max_loss_per_trade_pct: Optional[float] = None
 
+    # ── Intraday (MIS) product settings ────────────────────────────────────────
+    # Leverage multiplier for MIS (Margin Intraday Square-off) orders.
+    # e.g. 5.0 means only 20% capital is consumed per MIS position.
+    # 1.0 = no leverage (treat MIS like NRML for margin purposes).
+    mis_leverage: float = 1.0
+    # HH:MM (IST) at which all MIS positions are forcibly squared off.
+    # Set to "" or None to disable auto square-off in backtests.
+    squareoff_time: str = "15:15"
+
+
+@dataclass
+class AlertConfig:
+    """Notification backend credentials and event toggles."""
+    # Telegram Bot API
+    telegram_token: str = ""
+    telegram_chat_id: str = ""
+    # SMTP email
+    smtp_host: str = "smtp.gmail.com"
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    email_from: str = ""
+    email_to: str = ""             # Comma-separated recipients
+    # Per-event toggles
+    on_fill: bool = True
+    on_signal: bool = False
+    on_daily_loss: bool = True
+    on_stale_data: bool = True
+    on_startup: bool = True
+    on_shutdown: bool = True
+    # Minimum seconds between alerts of the same type (0 = unlimited)
+    cooldown_secs: float = 60.0
+
 
 @dataclass
 class WebhookConfig:
@@ -82,6 +115,7 @@ class Settings:
     risk: RiskConfig = field(default_factory=RiskConfig)
     webhook: WebhookConfig = field(default_factory=WebhookConfig)
     upstox: UpstoxConfig = field(default_factory=UpstoxConfig)
+    alerts: AlertConfig = field(default_factory=AlertConfig)
 
     # Signal deduplication window in seconds.
     dedup_window_seconds: int = 60

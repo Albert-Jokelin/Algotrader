@@ -103,20 +103,44 @@ class UpstoxBroker(IBroker):
         # InstrumentMaster — lazy-loaded if not provided
         self._instrument_master = instrument_master
 
+        # Idempotency guard: set of internal order_ids already sent to Upstox.
+        # Prevents double-submission when a response is lost (e.g. network drop
+        # right after the API call returns 200 but before we parse the body).
+        self._submitted_ids: set = set()
+
     # ── IBroker interface ──────────────────────────────────────────────────────
 
     def submit_order(
         self, order: Order, market_price: float = 0.0, bar=None
     ) -> Optional[Fill]:
+        # ── Idempotency guard ──────────────────────────────────────────────────
+        # If this order_id was already submitted (response may have been lost),
+        # do NOT re-submit — reconcile against the live order book instead.
+        if order.order_id in self._submitted_ids:
+            log.warning(
+                "Duplicate submission detected for order %s — reconciling instead "
+                "of placing a new order. Call reconcile_open_orders() to sync state.",
+                order.order_id,
+            )
+            raise OrderRejectedError(
+                f"Duplicate submission: order {order.order_id} was already sent "
+                "to Upstox. Call reconcile_open_orders() to check its status."
+            )
+
         instrument_key = self._map_symbol(order.symbol, order.exchange)
         upstox_product = _PRODUCT_MAP.get(order.product.upper(), "D")
+
+        # Use the internal order_id (UUID) as the Upstox tag for idempotency.
+        # Upstox limits tag to 20 chars; the first 20 of a UUID are unique enough
+        # within a trading session.
+        client_tag = order.order_id[:20]
 
         payload = {
             "quantity":           order.quantity,
             "product":            upstox_product,
             "validity":           order.validity,
             "price":              order.price or 0,
-            "tag":                order.strategy_name[:20],
+            "tag":                client_tag,
             "instrument_token":   instrument_key,
             "order_type":         _ORDER_TYPE_MAP[order.order_type],
             "transaction_type":   _SIDE_MAP[order.side],
@@ -125,9 +149,15 @@ class UpstoxBroker(IBroker):
             "is_amo":             False,
         }
 
+        # Mark as submitted BEFORE the API call.  If the network drops after the
+        # exchange accepts the order but before we receive the HTTP response, the
+        # idempotency guard will prevent a duplicate on the next retry.
+        self._submitted_ids.add(order.order_id)
+
         try:
             response = self._client.place_order(**payload)
         except Exception as exc:
+            # Keep the order in _submitted_ids so a retry will be caught.
             raise BrokerConnectionError(f"Upstox API error: {exc}") from exc
 
         status = response.get("status", "").upper()
@@ -204,6 +234,101 @@ class UpstoxBroker(IBroker):
     def process_open_order(self, order: Order, bar) -> Optional[Fill]:
         """Not used in live mode — OrderPoller handles status updates asynchronously."""
         return None
+
+    def reconcile_open_orders(self) -> int:
+        """Sync local open-order state against the live Upstox order book.
+
+        Call this at bot startup (after a crash or reconnect) to detect orders
+        that were submitted but whose responses were never received.
+
+        Algorithm
+        ---------
+        1. Fetch all orders from the Upstox API (GET /v2/orders).
+        2. For each local open order:
+           a. Match by ``broker_order_id`` if set, else by ``tag`` prefix
+              (the first 20 chars of ``order.order_id``).
+           b. If a match is found, update ``order.status`` from the API response.
+           c. Remove filled / cancelled / rejected orders from ``_open_orders``.
+        3. Return the number of orders that were reconciled (status updated).
+
+        Returns:
+            Number of local orders whose status was updated from the API.
+        """
+        try:
+            api_orders = self._client.get_orders() or []
+        except Exception as exc:
+            log.warning("reconcile_open_orders: could not fetch orders — %s", exc)
+            return 0
+
+        # Build a lookup index: broker_order_id → api_order dict
+        by_broker_id: Dict[str, dict] = {}
+        by_tag: Dict[str, dict] = {}
+        for ao in api_orders:
+            bid = ao.get("order_id") or ao.get("broker_order_id", "")
+            tag = (ao.get("tag") or "")[:20]
+            if bid:
+                by_broker_id[str(bid)] = ao
+            if tag:
+                by_tag[tag] = ao
+
+        _TERMINAL_API_STATUSES = frozenset({
+            "COMPLETE", "FILLED", "CANCELLED", "REJECTED",
+        })
+
+        reconciled = 0
+        to_remove = []
+
+        for oid, order in list(self._open_orders.items()):
+            # Match: prefer broker_order_id, fall back to tag prefix
+            ao = None
+            if order.broker_order_id:
+                ao = by_broker_id.get(str(order.broker_order_id))
+            if ao is None:
+                ao = by_tag.get(order.order_id[:20])
+
+            if ao is None:
+                log.debug(
+                    "reconcile: no Upstox match for local order %s — "
+                    "may have been submitted but not yet visible in order book",
+                    oid,
+                )
+                continue
+
+            api_status = (ao.get("status") or "").upper()
+            prev_status = order.status
+
+            if api_status in ("COMPLETE", "FILLED"):
+                order.status = OrderStatus.FILLED
+                order.broker_order_id = ao.get("order_id") or order.broker_order_id
+                to_remove.append(oid)
+            elif api_status in ("CANCELLED", "REJECTED"):
+                order.status = (
+                    OrderStatus.CANCELLED if api_status == "CANCELLED"
+                    else OrderStatus.REJECTED
+                )
+                to_remove.append(oid)
+            elif api_status in ("OPEN", "TRIGGER PENDING", "AMO REQ RECEIVED"):
+                order.status = OrderStatus.OPEN
+                order.broker_order_id = ao.get("order_id") or order.broker_order_id
+            elif api_status == "PARTIALLY_FILLED":
+                order.status = OrderStatus.PARTIALLY_FILLED
+                order.filled_quantity = int(ao.get("filled_quantity", 0) or 0)
+
+            if order.status != prev_status:
+                reconciled += 1
+                log.info(
+                    "reconcile: order %s status %s → %s",
+                    oid[:8], prev_status.value, order.status.value,
+                )
+
+        for oid in to_remove:
+            self._open_orders.pop(oid, None)
+
+        log.info(
+            "reconcile_open_orders: %d local orders checked, %d updated, %d removed",
+            len(self._open_orders) + len(to_remove), reconciled, len(to_remove),
+        )
+        return reconciled
 
     @property
     def available_capital(self) -> float:

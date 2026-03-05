@@ -114,10 +114,21 @@ class PaperBroker(IBroker):
             )
 
         if order.order_type == OrderType.LIMIT:
-            return self._try_fill_limit(order, market_price, bar)
+            fill = self._try_fill_limit(order, market_price, bar)
+            # IOC: expire immediately if not filled in this bar
+            if fill is None and order.validity == "IOC":
+                order.status = OrderStatus.EXPIRED
+                self._open_orders.pop(order.order_id, None)
+                return None
+            return fill
 
         if order.order_type == OrderType.STOP_MARKET:
-            return self._try_fill_stop_market(order, bar, market_price)
+            fill = self._try_fill_stop_market(order, bar, market_price)
+            if fill is None and order.validity == "IOC":
+                order.status = OrderStatus.EXPIRED
+                self._open_orders.pop(order.order_id, None)
+                return None
+            return fill
 
         # Other order types: queue for later processing
         self._open_orders[order.order_id] = order
@@ -157,6 +168,24 @@ class PaperBroker(IBroker):
         order = self._open_orders.pop(order_id)
         order.status = OrderStatus.CANCELLED
         return True
+
+    def expire_day_orders(self) -> int:
+        """Expire all DAY-validity open orders (call at session end: 15:30 IST).
+
+        GTC (Good-Till-Cancelled) orders are kept and will be re-evaluated on
+        the next session.  IOC orders are never queued, so this only affects DAY.
+
+        Returns:
+            Number of orders expired.
+        """
+        to_expire = [
+            oid for oid, o in self._open_orders.items()
+            if o.validity.upper() == "DAY"
+        ]
+        for oid in to_expire:
+            order = self._open_orders.pop(oid)
+            order.status = OrderStatus.EXPIRED
+        return len(to_expire)
 
     def get_positions(self) -> List[Position]:
         return [p for p in self._positions.values() if p.quantity != 0]
