@@ -16,6 +16,7 @@ pytz>=2023.3
 # Data analysis (backtesting)
 pandas>=2.0.0
 numpy>=1.24.0
+matplotlib>=3.0.0
 
 # Broker API (existing upstoxlite package)
 requests>=2.31.0
