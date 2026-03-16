@@ -31,10 +31,6 @@ from collections import defaultdict
 from datetime import date, datetime
 from typing import Dict, List, Optional, Tuple
 
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import matplotlib.ticker as mticker
 import numpy as np
 
 from algotrader.signals.models import Fill, OrderSide
@@ -104,6 +100,11 @@ def plot_calendar_heatmap(
     if not fills:
         return None
 
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import matplotlib.ticker as mticker
+
     mpnl = monthly_pnl(fills)
     if not mpnl:
         return None
@@ -167,6 +168,11 @@ def plot_daily_pnl(
     """
     if not fills:
         return None
+
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import matplotlib.ticker as mticker
 
     dpnl = daily_pnl(fills)
     if not dpnl:

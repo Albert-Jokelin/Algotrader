@@ -29,11 +29,6 @@ from __future__ import annotations
 import os
 from typing import List, Optional
 
-# Use non-interactive backend before importing pyplot
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import matplotlib.ticker as mticker
 import numpy as np
 
 
@@ -66,6 +61,11 @@ def plot_equity_curve(
     """
     if len(equity_curve) < 2:
         return None
+
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import matplotlib.ticker as mticker
 
     fig, ax = plt.subplots(figsize=(12, 5))
 
@@ -121,6 +121,11 @@ def plot_drawdown(
     """
     if len(equity_curve) < 2:
         return None
+
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import matplotlib.ticker as mticker
 
     dd = _drawdown_series(equity_curve)
     bars = list(range(len(dd)))
